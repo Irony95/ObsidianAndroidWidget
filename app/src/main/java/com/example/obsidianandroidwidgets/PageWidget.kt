@@ -75,9 +75,6 @@ object PageWidget: GlanceAppWidget() {
 
         provideContent {
             val text = currentState(key = textKey) ?: ""
-            val image = remember {
-                mutableStateOf<Bitmap?>(null)
-            }
             val packageName = LocalContext.current.packageName
             val localWidth = context.toPx(LocalSize.current.width.value)
             Log.d("test", packageName.toString())
@@ -106,10 +103,8 @@ object PageWidget: GlanceAppWidget() {
                     item {
 
                         val remoteView = RemoteViews(packageName, R.layout.test_layout)
-                        if (image.value != null)
-                        {
-                            remoteView.setImageViewBitmap(R.id.imageView,image.value!!)
-                        }
+
+                        remoteView.setImageViewBitmap(R.id.imageView,renderer.renderedBitmap(text))
                         AndroidRemoteViews(remoteView, modifier = GlanceModifier.clickable(actionStartActivity(openNote)).fillMaxSize().background(Color.Red))
 
                     }
@@ -121,13 +116,7 @@ object PageWidget: GlanceAppWidget() {
                         colorFilter = ColorFilter.tint(GlanceTheme.colors.primary),
                         contentDescription = "refresh",
                         modifier = GlanceModifier
-                            .clickable {
-                                val t = getNoteText(context)
-                                renderer.setMarkdown(t, localWidth.toInt()) {
-                                    Log.d("test", "callback called")
-                                    image.value=it
-                                }
-                            }
+                            .clickable(actionRunCallback(IncrementActionCallback::class.java))
                             .size(30.dp)
                     )
                 }
@@ -136,6 +125,15 @@ object PageWidget: GlanceAppWidget() {
             }
         }
     }
+}
+
+class SimplePageWidgetReceiver: GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget
+        get() = PageWidget
+}
+
+
+class IncrementActionCallback: ActionCallback {
     private fun getNoteText(context: Context): String {
         var text = ""
         val sf = context.getSharedPreferences("obsidian_widget_configs", Context.MODE_PRIVATE)
@@ -149,26 +147,17 @@ object PageWidget: GlanceAppWidget() {
         return text
     }
 
+    override suspend fun onAction(
+        context: Context,
+        glanceId: GlanceId,
+        parameters: ActionParameters
+    ) {
+        val text = getNoteText(context)
+
+        updateAppWidgetState(context, glanceId) { prefs ->
+            prefs[PageWidget.textKey] = text
+        }
+        PageWidget.update(context, glanceId)
+    }
 }
 
-class SimplePageWidgetReceiver: GlanceAppWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget
-        get() = PageWidget
-}
-
-
-//class IncrementActionCallback: ActionCallback {
-//    override suspend fun onAction(
-//        context: Context,
-//        glanceId: GlanceId,
-//        parameters: ActionParameters
-//    ) {
-//        val text = getNoteText(context)
-//
-//        updateAppWidgetState(context, glanceId) { prefs ->
-//            prefs[PageWidget.textKey] = text
-//        }
-//        PageWidget.update(context, glanceId)
-//    }
-//}
-//
