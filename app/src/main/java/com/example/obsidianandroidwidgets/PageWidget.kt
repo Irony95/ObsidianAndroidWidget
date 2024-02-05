@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.ColorFilter
 import androidx.glance.GlanceId
@@ -37,6 +38,7 @@ import androidx.glance.action.ActionParameters
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.AndroidRemoteViews
 import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
@@ -54,10 +56,7 @@ import androidx.glance.layout.Row
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
-import io.noties.markwon.Markwon
-import io.noties.markwon.ext.tasklist.TaskListPlugin
-import org.json.JSONObject
-import java.io.File
+import androidx.work.WorkManager
 import java.io.FileReader
 import java.net.URLEncoder
 
@@ -68,26 +67,45 @@ object PageWidget: GlanceAppWidget() {
         dp,
         resources.displayMetrics)
 
+    val buttonSize = 40
+
     val mdFilePathKey = stringPreferencesKey("mdFilePathKey")
     val vaultPathKey = stringPreferencesKey("vaultPathKey")
-    val textKey = stringPreferencesKey("text")
+    val textKey = stringPreferencesKey("textKey")
+    val showTools = booleanPreferencesKey("showTools")
+
+    override suspend fun onDelete(context: Context, glanceId: GlanceId) {
+        super.onDelete(context, glanceId)
+        val widgetCount = GlanceAppWidgetManager(context).getGlanceIds(PageWidget.javaClass).size
+        if (widgetCount == 0)
+        {
+            //cancel once all the widgets are deleted
+            WorkManager
+                .getInstance(context)
+                .cancelUniqueWork(WORK_NAME)
+        }
+    }
     @RequiresApi(Build.VERSION_CODES.O)
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-
         provideContent {
-            val text = currentState(key = textKey) ?: ""
             val mdFilePath = currentState(key=mdFilePathKey) ?: ""
+            val text = currentState(key=textKey) ?: getNoteText(mdFilePath)
             val vaultPath = currentState(key= vaultPathKey) ?: ""
+            val showTools = currentState(key=showTools) ?: true
 
             val renderer = BitmapRenderer(context, "$vaultPath/.obsidian/appearance.json")
 
-            val localWidth = context.toPx(LocalSize.current.width.value - 30)
+            var dpWidth = if (showTools) LocalSize.current.width.value - buttonSize else LocalSize.current.width.value
+            val localWidth = context.toPx(dpWidth)
 
-//            val intent = context.packageManager.getLaunchIntentForPackage("md.obsidian")
-//            intent?.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            var filePath = Environment.getExternalStorageDirectory().toString() + "/" + mdFilePath
-            filePath = URLEncoder.encode(filePath, "UTF-8").dropLast(3)
-            val openNote: Intent = Uri.parse("obsidian://open?path=$filePath").let { webpage ->
+            var encodedPath = Environment.getExternalStorageDirectory().toString() + "/" + mdFilePath
+            encodedPath = URLEncoder.encode(encodedPath, "UTF-8").dropLast(3)
+            val openNote: Intent = Intent(Intent.ACTION_VIEW,
+                Uri.parse("obsidian://open?path=$encodedPath")
+            )
+
+            var encodedVault = URLEncoder.encode(vaultPath, "UTF-8")
+            val newNote: Intent = Uri.parse("obsidian://new?vault=$encodedVault&name=new%20note").let { webpage ->
                 Intent(Intent.ACTION_VIEW, webpage)
             }
 
@@ -97,7 +115,7 @@ object PageWidget: GlanceAppWidget() {
                     .fillMaxSize()
                     .cornerRadius(10.dp)
                     .padding(5.dp)
-                    .background(Color.LightGray),
+                    .background(Color.DarkGray),
             ) {
                 LazyColumn(
                     modifier = GlanceModifier
@@ -110,21 +128,36 @@ object PageWidget: GlanceAppWidget() {
                         AndroidRemoteViews(remoteView, modifier = GlanceModifier.clickable(actionStartActivity(openNote)).fillMaxSize())
                     }
                 }
+                if (showTools) {
+                        Column{
+                            Image(
+                                provider = ImageProvider(R.drawable.baseline_refresh_24),
+                                colorFilter = ColorFilter.tint(GlanceTheme.colors.inversePrimary),
+                                contentDescription = "refresh",
+                                modifier = GlanceModifier
+                                    .clickable(actionRunCallback<ReloadWidget>())
+                                    .size(buttonSize.dp)
+                            )
 
-                Column{
-                    Image(
-                        provider = ImageProvider(R.drawable.baseline_refresh_24),
-                        colorFilter = ColorFilter.tint(GlanceTheme.colors.primary),
-                        contentDescription = "refresh",
-                        modifier = GlanceModifier
-                            .clickable(actionRunCallback(ReloadWidget::class.java))
-                            .size(30.dp)
-                    )
+                            Image(
+                                provider = ImageProvider(R.drawable.baseline_add_circle_outline_24),
+                                colorFilter = ColorFilter.tint(GlanceTheme.colors.inversePrimary),
+                                contentDescription = "add",
+                                modifier = GlanceModifier
+                                    .clickable(actionStartActivity(newNote))
+                                    .size(buttonSize.dp)
+                            )
+                        }
                 }
-
-
             }
         }
+    }
+    fun getNoteText(directory : String): String {
+        if (directory == "") return ""
+        val reader = FileReader(Environment.getExternalStorageDirectory().toString() + "/" + directory)
+        val text = reader.readText()
+        reader.close()
+        return text
     }
 }
 
@@ -135,13 +168,7 @@ class SimplePageWidgetReceiver: GlanceAppWidgetReceiver() {
 
 
 class ReloadWidget: ActionCallback {
-    private fun getNoteText(directory : String): String {
-        if (directory == "") return ""
-        val reader = FileReader(Environment.getExternalStorageDirectory().toString() + "/" + directory)
-        val text = reader.readText()
-        reader.close()
-        return text
-    }
+
 
     override suspend fun onAction(
         context: Context,
@@ -150,8 +177,9 @@ class ReloadWidget: ActionCallback {
     ) {
 
         updateAppWidgetState(context, glanceId) { prefs ->
-            val text = getNoteText(prefs[PageWidget.mdFilePathKey] ?: "")
+            val text = PageWidget.getNoteText(prefs[PageWidget.mdFilePathKey] ?: "")
             prefs[PageWidget.textKey] = text
+            Log.d("test", "updated the text")
         }
         PageWidget.update(context, glanceId)
     }

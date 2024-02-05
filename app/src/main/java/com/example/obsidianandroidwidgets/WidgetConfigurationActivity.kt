@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.pdf.PdfDocument.Page
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -24,6 +25,7 @@ import android.webkit.WebViewClient
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -61,28 +63,25 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.PeriodicWorkRequest.Companion.MIN_PERIODIC_INTERVAL_MILLIS
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.obsidianandroidwidgets.ui.theme.ObsidianAndroidWidgetsTheme
-import com.google.gson.Gson
-import com.google.gson.GsonBuilder
-import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileReader
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.Path
 
 
 class WidgetConfigurationActivity : ComponentActivity() {
 
     private val INITIAL_URI = Environment.getExternalStorageDirectory().absolutePath
-
-    companion object {
-        const val MD_PAGE_PATH_KEY = "markdown_page_path"
-        const val FOLLOW_THEME_CONFIG_KEY = "follow_vault_theme_setting"
-        const val RIBBON_BUTTONS_CONFIG_KEY = "show_ribbon_buttons"
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         WebView.enableSlowWholeDocumentDraw()
@@ -110,14 +109,15 @@ class WidgetConfigurationActivity : ComponentActivity() {
             val context = LocalContext.current
 
             val filePath by fileMutable.collectAsState()
-
-            var followTheme by remember {
+            var showTools by remember {
                 mutableStateOf(true)
             }
+
             var imageBmp by remember {
                 mutableStateOf<Bitmap?>(null)
             }
-            val md = """                          
+            val md = """  
+                # renderer test!
                 - [ ] This should work?
                 - [x] What about this?
     
@@ -142,7 +142,7 @@ class WidgetConfigurationActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                 ) {
-                    filePicker(filePath = filePath ?: "") {
+                    filePicker(filePath = filePath) {
                         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE)
                             type = "text/markdown"
@@ -150,8 +150,10 @@ class WidgetConfigurationActivity : ComponentActivity() {
                         }
                         getContent.launch(intent)
                     }
-                    checkboxAndText(followTheme, "Follow Vault Theme") {
-                        followTheme = it
+                    Row {
+                        checkboxAndText(checked = showTools, text = "show Tools", onCheckedChange = {
+                            showTools = it
+                        })
                     }
 
                     Row(
@@ -163,34 +165,40 @@ class WidgetConfigurationActivity : ComponentActivity() {
                     ) {
 
                         Button(onClick = {
+                            if (fileMutable.value == "")
+                            {
+                                Toast.makeText(baseContext, "Please Select a page to show!", Toast.LENGTH_LONG).show()
+                                Log.d("test", "asfdasfd")
+                                return@Button
+                            }
 
                             CoroutineScope(Dispatchers.IO).launch {
                                 val manager = GlanceAppWidgetManager(baseContext)
                                 val gId = manager.getGlanceIdBy(appWidgetId)
                                 var vaultPath = ""
-                                if (followTheme)
+                                var vaultFolder = getVaultDirFromFile(Environment.getExternalStorageDirectory().toString(), filePath)
+                                if (vaultFolder != null)
                                 {
-                                    var vaultFolder = getVaultDirFromFile(Environment.getExternalStorageDirectory().toString(), filePath)
-                                    if (vaultFolder != null)
-                                    {
-                                        vaultPath = vaultFolder.path
-                                    }
+                                    vaultPath = vaultFolder.path
                                 }
 
                                 updateAppWidgetState(context, gId) {
                                     it[PageWidget.mdFilePathKey] = filePath
                                     it[PageWidget.vaultPathKey] = vaultPath
+                                    it[PageWidget.showTools] = showTools
                                 }
                                 PageWidget.update(context, gId)
                             }
 
                             val resultValue = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                             setResult(Activity.RESULT_OK, resultValue)
+                            startWorkManager(context)
                             finish()
                         }) {
                             Text("Complete")
                         }
                     }
+
                     if (imageBmp != null)
                     {
                         LazyColumn(content = {
@@ -222,6 +230,17 @@ class WidgetConfigurationActivity : ComponentActivity() {
             parentFile = parentFile.parentFile
         }
         return null
+    }
+
+    private fun startWorkManager(context: Context) {
+        val request = PeriodicWorkRequestBuilder<UpdateWidgetWorker>(
+            MIN_PERIODIC_INTERVAL_MILLIS,
+            TimeUnit.MILLISECONDS,
+        ).build()
+
+        WorkManager
+            .getInstance(context)
+            .enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 }
 

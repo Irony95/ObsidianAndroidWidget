@@ -1,19 +1,14 @@
 package com.example.obsidianandroidwidgets
 
-import android.app.PendingIntent
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.util.Log
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.LinearLayout
+import android.graphics.Color
 import android.widget.TextView
+import io.noties.markwon.AbstractMarkwonPlugin
 import io.noties.markwon.Markwon
 import io.noties.markwon.SoftBreakAddsNewLinePlugin
+import io.noties.markwon.core.MarkwonTheme
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
 import io.noties.markwon.ext.tasklist.TaskListPlugin
@@ -21,6 +16,7 @@ import io.noties.markwon.html.HtmlPlugin
 import org.json.JSONObject
 import java.io.File
 import java.io.FileReader
+
 
 class BitmapRenderer(val context: Context, val appearancePath: String) {
 
@@ -33,10 +29,11 @@ class BitmapRenderer(val context: Context, val appearancePath: String) {
             .usePlugin(SoftBreakAddsNewLinePlugin.create())
             .usePlugin(StrikethroughPlugin.create())
             .usePlugin(HtmlPlugin.create())
-        if (appearancePath != "")
-        {
-            loadTheme(builder)
-        }
+            .usePlugin(object:  AbstractMarkwonPlugin() {
+                override fun configureTheme(builder: MarkwonTheme.Builder) {
+                    builder
+                }
+            })
         markwon = builder.build()
     }
     fun loadTheme(builder: Markwon.Builder)
@@ -52,6 +49,7 @@ class BitmapRenderer(val context: Context, val appearancePath: String) {
     }
     fun renderBitmap(string: String, width : Int) : Bitmap {
         var textView = TextView(context)
+        textView.setTextColor(Color.WHITE)
         textView.width = width
         markwon.setMarkdown(textView, string)
 //        textView.text = string
@@ -60,6 +58,7 @@ class BitmapRenderer(val context: Context, val appearancePath: String) {
 
         val bitmap = Bitmap.createBitmap(width, textView.measuredHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.DKGRAY)
         canvas.translate(0F, 0F)
         textView.draw(canvas)
 

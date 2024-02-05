@@ -21,12 +21,6 @@
         android:requestLegacyExternalStorage="true"
         tools:targetApi="31">
 
-        <service
-            android:name=".FileSystemObserverService"
-            android:exported="true"
-            android:enabled="true"
-        />
-
         <activity android:name=".WidgetConfigurationActivity"
             android:exported="true">
             <intent-filter>
