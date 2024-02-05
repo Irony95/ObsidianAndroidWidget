@@ -1,7 +1,10 @@
 package com.example.obsidianandroidwidgets;
 
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration.ORIENTATION_PORTRAIT
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
@@ -18,6 +21,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -50,40 +54,40 @@ import androidx.glance.layout.Row
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
+import com.google.gson.JsonParser
 import io.noties.markwon.Markwon
 import io.noties.markwon.ext.tasklist.TaskListPlugin
+import org.json.JSONObject
+import java.io.File
 import java.io.FileReader
 import java.net.URLEncoder
 
 object PageWidget: GlanceAppWidget() {
+    override val sizeMode = SizeMode.Exact
     fun Context.toPx(dp: Float): Float = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP,
         dp,
         resources.displayMetrics)
 
+    val mdFilePathKey = stringPreferencesKey("mdFilePathKey")
+    val vaultPathKey = stringPreferencesKey("vaultPathKey")
     val textKey = stringPreferencesKey("text")
     @RequiresApi(Build.VERSION_CODES.O)
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val renderer = BitmapRenderer(context)
-
-        val sharedPreferences = context.getSharedPreferences("obsidian_widget_configs", Context.MODE_PRIVATE)
-        val mdFilePath = sharedPreferences.getString(WidgetConfigurationActivity.MD_PAGE_PATH_KEY, "")
-        val service = Intent(context, FileSystemObserverService::class.java)
-        service.putExtra(FileSystemObserverService.PATH_EXTRA, mdFilePath)
-
-        context.startService(service)
 
         provideContent {
             val text = currentState(key = textKey) ?: ""
-            val packageName = LocalContext.current.packageName
-            val localWidth = context.toPx(LocalSize.current.width.value)
-            Log.d("test", packageName.toString())
+            val mdFilePath = currentState(key=mdFilePathKey) ?: ""
+            val vaultPath = currentState(key= vaultPathKey) ?: ""
+
+            val renderer = BitmapRenderer(context, "$vaultPath/.obsidian/appearance.json")
+
+            val localWidth = context.toPx(LocalSize.current.width.value - 30)
 
 //            val intent = context.packageManager.getLaunchIntentForPackage("md.obsidian")
 //            intent?.flags = Intent.FLAG_ACTIVITY_NEW_TASK
             var filePath = Environment.getExternalStorageDirectory().toString() + "/" + mdFilePath
             filePath = URLEncoder.encode(filePath, "UTF-8").dropLast(3)
-            Log.d("test", filePath)
             val openNote: Intent = Uri.parse("obsidian://open?path=$filePath").let { webpage ->
                 Intent(Intent.ACTION_VIEW, webpage)
             }
@@ -92,7 +96,7 @@ object PageWidget: GlanceAppWidget() {
             Row(
                 modifier = GlanceModifier
                     .fillMaxSize()
-                    .cornerRadius(50.dp)
+                    .cornerRadius(10.dp)
                     .padding(5.dp)
                     .background(Color.LightGray),
             ) {
@@ -101,12 +105,10 @@ object PageWidget: GlanceAppWidget() {
                         .defaultWeight()
                 ) {
                     item {
+                        val remoteView = RemoteViews(LocalContext.current.packageName, R.layout.test_layout)
 
-                        val remoteView = RemoteViews(packageName, R.layout.test_layout)
-
-                        remoteView.setImageViewBitmap(R.id.imageView,renderer.renderedBitmap(text))
-                        AndroidRemoteViews(remoteView, modifier = GlanceModifier.clickable(actionStartActivity(openNote)).fillMaxSize().background(Color.Red))
-
+                        remoteView.setImageViewBitmap(R.id.imageView,renderer.renderBitmap(text, localWidth.toInt()))
+                        AndroidRemoteViews(remoteView, modifier = GlanceModifier.clickable(actionStartActivity(openNote)).fillMaxSize())
                     }
                 }
 
@@ -116,7 +118,7 @@ object PageWidget: GlanceAppWidget() {
                         colorFilter = ColorFilter.tint(GlanceTheme.colors.primary),
                         contentDescription = "refresh",
                         modifier = GlanceModifier
-                            .clickable(actionRunCallback(IncrementActionCallback::class.java))
+                            .clickable(actionRunCallback(ReloadWidget::class.java))
                             .size(30.dp)
                     )
                 }
@@ -133,17 +135,12 @@ class SimplePageWidgetReceiver: GlanceAppWidgetReceiver() {
 }
 
 
-class IncrementActionCallback: ActionCallback {
-    private fun getNoteText(context: Context): String {
-        var text = ""
-        val sf = context.getSharedPreferences("obsidian_widget_configs", Context.MODE_PRIVATE)
-        val filePath = sf.getString(WidgetConfigurationActivity.MD_PAGE_PATH_KEY, "")
-        if (filePath != null)
-        {
-            val reader = FileReader(Environment.getExternalStorageDirectory().toString() + "/" + filePath)
-            text = reader.readText()
-            reader.close()
-        }
+class ReloadWidget: ActionCallback {
+    private fun getNoteText(directory : String): String {
+        if (directory == "") return ""
+        val reader = FileReader(Environment.getExternalStorageDirectory().toString() + "/" + directory)
+        val text = reader.readText()
+        reader.close()
         return text
     }
 
@@ -152,12 +149,11 @@ class IncrementActionCallback: ActionCallback {
         glanceId: GlanceId,
         parameters: ActionParameters
     ) {
-        val text = getNoteText(context)
 
         updateAppWidgetState(context, glanceId) { prefs ->
+            val text = getNoteText(prefs[PageWidget.mdFilePathKey] ?: "")
             prefs[PageWidget.textKey] = text
         }
         PageWidget.update(context, glanceId)
     }
 }
-

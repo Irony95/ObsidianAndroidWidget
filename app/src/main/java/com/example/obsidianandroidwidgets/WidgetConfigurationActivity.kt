@@ -58,15 +58,19 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.state.updateAppWidgetState
 import com.example.obsidianandroidwidgets.ui.theme.ObsidianAndroidWidgetsTheme
-import com.vladsch.flexmark.ext.emoji.EmojiExtension
-import com.vladsch.flexmark.ext.gfm.tasklist.TaskListExtension
-import com.vladsch.flexmark.html.HtmlRenderer
-import com.vladsch.flexmark.parser.Parser
-import com.vladsch.flexmark.util.data.MutableDataSet
-import com.vladsch.flexmark.util.misc.Extension
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonParser
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import java.io.File
+import java.io.FileReader
 import kotlin.io.path.Path
 
 
@@ -90,16 +94,14 @@ class WidgetConfigurationActivity : ComponentActivity() {
             }
         }
 
-        val sharedPref = baseContext.getSharedPreferences("obsidian_widget_configs", Context.MODE_PRIVATE)
         super.onCreate(savedInstanceState)
-        var fileMutable = MutableStateFlow(sharedPref.getString(MD_PAGE_PATH_KEY, ""))
+        var fileMutable = MutableStateFlow("")
 
         val getContent =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
                 if (it.resultCode == Activity.RESULT_OK)
                 {
-                    fileMutable.value = (it.data?.data?.lastPathSegment)?.removeRange(0, 8)
-                    Log.d("test", fileMutable.value ?: "")
+                    fileMutable.value = (it.data?.data?.lastPathSegment)?.removeRange(0, 8) ?: ""
                 }
             }
 
@@ -110,12 +112,8 @@ class WidgetConfigurationActivity : ComponentActivity() {
             val filePath by fileMutable.collectAsState()
 
             var followTheme by remember {
-                mutableStateOf(sharedPref.getBoolean(FOLLOW_THEME_CONFIG_KEY, true))
+                mutableStateOf(true)
             }
-            var showRibbon by remember {
-                mutableStateOf(sharedPref.getBoolean(RIBBON_BUTTONS_CONFIG_KEY, false))
-            }
-
             var imageBmp by remember {
                 mutableStateOf<Bitmap?>(null)
             }
@@ -128,16 +126,10 @@ class WidgetConfigurationActivity : ComponentActivity() {
                 ```
                 This is a codeblock
                 ```
-                *Bold!!!*
-                
-                more m
-                asdf
-                as
+                *Bold!!!*               
             """.trimIndent()
-            val render = BitmapRenderer(context)
-            render.setMarkdown(md, 1000) {
-                imageBmp = it
-            }
+            val render = BitmapRenderer(context, "")
+            imageBmp = render.renderBitmap(md, 1000)
 
 
             ObsidianAndroidWidgetsTheme {
@@ -162,10 +154,6 @@ class WidgetConfigurationActivity : ComponentActivity() {
                         followTheme = it
                     }
 
-                    checkboxAndText(showRibbon, "Show Obsidian ribbon buttons") {
-                        showRibbon = it
-                    }
-
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -175,11 +163,26 @@ class WidgetConfigurationActivity : ComponentActivity() {
                     ) {
 
                         Button(onClick = {
-                            val editor = sharedPref.edit()
-                            editor.putString(MD_PAGE_PATH_KEY, filePath ?: "")
-                            editor.putBoolean(FOLLOW_THEME_CONFIG_KEY, followTheme)
-                            editor.putBoolean(RIBBON_BUTTONS_CONFIG_KEY, showRibbon)
-                            editor.commit()
+
+                            CoroutineScope(Dispatchers.IO).launch {
+                                val manager = GlanceAppWidgetManager(baseContext)
+                                val gId = manager.getGlanceIdBy(appWidgetId)
+                                var vaultPath = ""
+                                if (followTheme)
+                                {
+                                    var vaultFolder = getVaultDirFromFile(Environment.getExternalStorageDirectory().toString(), filePath)
+                                    if (vaultFolder != null)
+                                    {
+                                        vaultPath = vaultFolder.path
+                                    }
+                                }
+
+                                updateAppWidgetState(context, gId) {
+                                    it[PageWidget.mdFilePathKey] = filePath
+                                    it[PageWidget.vaultPathKey] = vaultPath
+                                }
+                                PageWidget.update(context, gId)
+                            }
 
                             val resultValue = Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                             setResult(Activity.RESULT_OK, resultValue)
@@ -188,15 +191,12 @@ class WidgetConfigurationActivity : ComponentActivity() {
                             Text("Complete")
                         }
                     }
-                    Log.d("test", "rendered on jpc")
                     if (imageBmp != null)
                     {
-                        Log.d("test", "asfdasf")
                         LazyColumn(content = {
                             item {
                                 Image(modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Red),
+                                    .fillMaxSize(),
                                     bitmap = imageBmp!!.asImageBitmap(),
                                     contentDescription = "asdfsadf"
                                 )
@@ -207,6 +207,21 @@ class WidgetConfigurationActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    fun getVaultDirFromFile(baseDir: String, filePath: String): File? {
+        var parentFile = File("$baseDir/$filePath").parentFile
+        while (parentFile.path != baseDir)
+        {
+            if (parentFile.listFiles() == null) { return null }
+            for (file in parentFile.listFiles())
+            {
+                if (file.name == ".obsidian") return parentFile
+            }
+
+            parentFile = parentFile.parentFile
+        }
+        return null
     }
 }
 
