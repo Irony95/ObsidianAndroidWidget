@@ -54,7 +54,6 @@ import androidx.glance.layout.Row
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
-import com.google.gson.JsonParser
 import io.noties.markwon.Markwon
 import io.noties.markwon.ext.tasklist.TaskListPlugin
 import org.json.JSONObject
