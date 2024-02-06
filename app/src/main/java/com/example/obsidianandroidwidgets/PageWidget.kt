@@ -1,29 +1,16 @@
 package com.example.obsidianandroidwidgets;
 
-import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration.ORIENTATION_PORTRAIT
-import android.content.res.Resources
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.util.Log
 import android.util.TypedValue
-import android.view.View
-import android.view.ViewGroup
-import android.widget.LinearLayout
 import android.widget.RemoteViews
-import android.widget.TextView
 import androidx.annotation.RequiresApi
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.ColorFilter
@@ -44,7 +31,6 @@ import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
-import androidx.glance.appwidget.background
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.provideContent
@@ -56,20 +42,27 @@ import androidx.glance.layout.Row
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.work.WorkManager
+import java.io.BufferedReader
+import java.io.FileNotFoundException
 import java.io.FileReader
+import java.io.IOException
+import java.io.InputStream
+import java.io.InputStreamReader
 import java.net.URLEncoder
 
 object PageWidget: GlanceAppWidget() {
     override val sizeMode = SizeMode.Exact
+    override val stateDefinition = PreferencesGlanceStateDefinition
     fun Context.toPx(dp: Float): Float = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP,
         dp,
         resources.displayMetrics)
 
-    val buttonSize = 40
+    val buttonSize = 50
 
-    val mdFilePathKey = stringPreferencesKey("mdFilePathKey")
+        val mdFilePathKey = stringPreferencesKey("mdFilePathKey")
     val vaultPathKey = stringPreferencesKey("vaultPathKey")
     val textKey = stringPreferencesKey("textKey")
     val showTools = booleanPreferencesKey("showTools")
@@ -89,7 +82,7 @@ object PageWidget: GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             val mdFilePath = currentState(key=mdFilePathKey) ?: ""
-            val text = currentState(key=textKey) ?: getNoteText(mdFilePath)
+            val text = currentState(key=textKey) ?: getNoteText(context, mdFilePath)
             val vaultPath = currentState(key= vaultPathKey) ?: ""
             val showTools = currentState(key=showTools) ?: true
 
@@ -152,12 +145,34 @@ object PageWidget: GlanceAppWidget() {
             }
         }
     }
-    fun getNoteText(directory : String): String {
+
+    private fun loadMarkdown(context: Context, uri: Uri): String {
+        val contentResolver = context.contentResolver
+
+        val takeFlags: Int = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        // Check for the freshest data.
+        contentResolver.takePersistableUriPermission(uri, takeFlags)
+
+        try {
+            val ins: InputStream = contentResolver.openInputStream(uri)!!
+            val reader = BufferedReader(InputStreamReader(ins, "utf-8"))
+            val data = reader.lines().reduce { s, t -> s + "\n" + t }
+            return data.get()
+        } catch (err: FileNotFoundException) {
+            return ""
+        }
+    }
+    fun getNoteText(context: Context, directory : String): String {
         if (directory == "") return ""
         val reader = FileReader(Environment.getExternalStorageDirectory().toString() + "/" + directory)
         val text = reader.readText()
         reader.close()
         return text
+//        val uri = Uri.parse(directory)
+//        val a = loadMarkdown(context, uri)
+//        Log.d("test", a)
+//        return a
     }
 }
 
@@ -168,8 +183,6 @@ class SimplePageWidgetReceiver: GlanceAppWidgetReceiver() {
 
 
 class ReloadWidget: ActionCallback {
-
-
     override suspend fun onAction(
         context: Context,
         glanceId: GlanceId,
@@ -177,7 +190,7 @@ class ReloadWidget: ActionCallback {
     ) {
 
         updateAppWidgetState(context, glanceId) { prefs ->
-            val text = PageWidget.getNoteText(prefs[PageWidget.mdFilePathKey] ?: "")
+            val text = PageWidget.getNoteText(context,prefs[PageWidget.mdFilePathKey] ?: "")
             prefs[PageWidget.textKey] = text
             Log.d("test", "updated the text")
         }

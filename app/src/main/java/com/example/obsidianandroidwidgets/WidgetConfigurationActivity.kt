@@ -1,36 +1,25 @@
 package com.example.obsidianandroidwidgets
 
 import android.app.Activity
-import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.pdf.PdfDocument.Page
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.os.Handler
-import android.os.Looper
 import android.provider.DocumentsContract
-import android.provider.Settings
+import android.provider.OpenableColumns
 import android.util.Log
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -53,18 +42,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.glance.appwidget.GlanceAppWidget
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.ExistingWorkPolicy
 import androidx.work.PeriodicWorkRequest.Companion.MIN_PERIODIC_INTERVAL_MILLIS
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -74,35 +59,39 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
-import java.io.FileReader
 import java.util.concurrent.TimeUnit
-import kotlin.io.path.Path
 
 
 class WidgetConfigurationActivity : ComponentActivity() {
 
     private val INITIAL_URI = Environment.getExternalStorageDirectory().absolutePath
 
+
+    @RequiresApi(Build.VERSION_CODES.Q)
     override fun onCreate(savedInstanceState: Bundle?) {
         WebView.enableSlowWholeDocumentDraw()
-        if (Build.VERSION.SDK_INT >= 30) {
-            if (!Environment.isExternalStorageManager()) {
-                val getpermission = Intent()
-                getpermission.action = Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
-                startActivity(getpermission)
-            }
-        }
+        checkAndRequestPermissions(this)
 
         super.onCreate(savedInstanceState)
         var fileMutable = MutableStateFlow("")
 
         val getContent =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-                if (it.resultCode == Activity.RESULT_OK)
+                if (it.resultCode == Activity.RESULT_OK && it.data?.data != null)
                 {
-                    fileMutable.value = (it.data?.data?.lastPathSegment)?.removeRange(0, 8) ?: ""
+                    fileMutable.value = it.data!!.data!!.path!!.split(":")[1]
+                    Log.d("test", fileMutable.value)
                 }
             }
+
+        val dirRequest = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            uri?.let {
+                // call this to persist permission across decice reboots
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                Log.d("test", it.path ?: "WHAT")
+                // do your stuff
+            }
+        }
 
 
         setContent {
@@ -142,14 +131,20 @@ class WidgetConfigurationActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                 ) {
-                    filePicker(filePath = filePath) {
+                    filePicker(filePath = filePath, "Select Page") {
                         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            putExtra(DocumentsContract.EXTRA_INITIAL_URI, INITIAL_URI)
                             addCategory(Intent.CATEGORY_OPENABLE)
                             type = "text/markdown"
-                            putExtra(DocumentsContract.EXTRA_INITIAL_URI, INITIAL_URI)
                         }
                         getContent.launch(intent)
                     }
+
+//                    filePicker(filePath = filePath, "Select Folder") {
+//                        dirRequest.launch(null)
+//                    }
+
                     Row {
                         checkboxAndText(checked = showTools, text = "show Tools", onCheckedChange = {
                             showTools = it
@@ -224,6 +219,7 @@ class WidgetConfigurationActivity : ComponentActivity() {
             if (parentFile.listFiles() == null) { return null }
             for (file in parentFile.listFiles())
             {
+                Log.d("test", parentFile.path)
                 if (file.name == ".obsidian") return parentFile
             }
 
@@ -242,10 +238,30 @@ class WidgetConfigurationActivity : ComponentActivity() {
             .getInstance(context)
             .enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
+
+    fun checkAndRequestPermissions(context: Activity): Boolean {
+        val extStorePermission = ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        val listPermissionsNeeded: MutableList<String> = ArrayList()
+        if (extStorePermission != PackageManager.PERMISSION_GRANTED) {
+            listPermissionsNeeded.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        if (extStorePermission != PackageManager.PERMISSION_GRANTED) {
+            listPermissionsNeeded.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        if (extStorePermission != PackageManager.PERMISSION_GRANTED) {
+            listPermissionsNeeded.add(android.Manifest.permission.MANAGE_EXTERNAL_STORAGE)
+        }
+        if (listPermissionsNeeded.isNotEmpty()) {
+            ActivityCompat.requestPermissions(context, listPermissionsNeeded.toTypedArray(), 100)
+            return false
+        }
+
+        return true
+    }
 }
 
 @Composable
-fun filePicker(filePath: String, onClick: () -> Unit) {
+fun filePicker(filePath: String, buttonText: String, onClick: () -> Unit) {
     val scroll = rememberScrollState(0)
 
     Row(
@@ -258,7 +274,7 @@ fun filePicker(filePath: String, onClick: () -> Unit) {
             .width(250.dp)
             .horizontalScroll(scroll))
         Button(onClick = onClick, modifier = Modifier.padding(5.dp)) {
-            Text(text = "Select Page")
+            Text(text = buttonText)
         }
     }
 }

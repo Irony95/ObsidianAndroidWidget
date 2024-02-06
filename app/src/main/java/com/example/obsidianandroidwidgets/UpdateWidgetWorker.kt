@@ -18,7 +18,7 @@ class UpdateWidgetWorker(private val context: Context,
         CoroutineScope(Dispatchers.IO).launch {
             GlanceAppWidgetManager(context).getGlanceIds(PageWidget.javaClass).forEach {
                 updateAppWidgetState(context, it) { prefs ->
-                    val text = PageWidget.getNoteText(prefs[PageWidget.mdFilePathKey] ?: "")
+                    val text = PageWidget.getNoteText(context,prefs[PageWidget.mdFilePathKey] ?: "")
                     prefs[PageWidget.textKey] = text
                     Log.d("test", "updated the text in worker!")
                 }
