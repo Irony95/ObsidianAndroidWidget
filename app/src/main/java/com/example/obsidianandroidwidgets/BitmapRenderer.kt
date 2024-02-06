@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.widget.TextView
+import androidx.compose.ui.unit.sp
 import io.noties.markwon.AbstractMarkwonPlugin
 import io.noties.markwon.Markwon
 import io.noties.markwon.SoftBreakAddsNewLinePlugin
@@ -50,6 +51,7 @@ class BitmapRenderer(val context: Context, val appearancePath: String) {
     fun renderBitmap(string: String, width : Int) : Bitmap {
         var textView = TextView(context)
         textView.setTextColor(Color.WHITE)
+        textView.textSize = 18F
         textView.width = width
         markwon.setMarkdown(textView, string)
 //        textView.text = string

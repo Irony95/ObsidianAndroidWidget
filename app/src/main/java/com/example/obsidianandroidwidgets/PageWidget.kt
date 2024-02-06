@@ -91,16 +91,20 @@ object PageWidget: GlanceAppWidget() {
             var dpWidth = if (showTools) LocalSize.current.width.value - buttonSize else LocalSize.current.width.value
             val localWidth = context.toPx(dpWidth)
 
-            var encodedPath = Environment.getExternalStorageDirectory().toString() + "/" + mdFilePath
-            encodedPath = URLEncoder.encode(encodedPath, "UTF-8").dropLast(3)
-            val openNote: Intent = Intent(Intent.ACTION_VIEW,
-                Uri.parse("obsidian://open?path=$encodedPath")
+            var encodedFile = mdFilePath.split("/").lastOrNull()?.dropLast(3)
+            encodedFile = URLEncoder.encode(encodedFile, "UTF-8").replace("+", "%20")
+            var encodedVault = vaultPath.split("/").lastOrNull()
+            encodedVault = URLEncoder.encode(encodedVault, "UTF-8").replace("+", "%20")
+            Log.d("test", "obsidian://open?vault=$encodedVault&file=$encodedFile")
+
+            val openNote = Intent(Intent.ACTION_VIEW,
+                Uri.parse("obsidian://open?vault=$encodedVault&file=$encodedFile")
             )
 
-            var encodedVault = URLEncoder.encode(vaultPath, "UTF-8")
-            val newNote: Intent = Uri.parse("obsidian://new?vault=$encodedVault&name=new%20note").let { webpage ->
-                Intent(Intent.ACTION_VIEW, webpage)
-            }
+            val newNote = Intent(Intent.ACTION_VIEW,
+                Uri.parse("obsidian://new?vault=$encodedVault&name=new%20note")
+            )
+
 
 
             Row(
