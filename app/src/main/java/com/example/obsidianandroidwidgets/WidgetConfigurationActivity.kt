@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -21,6 +22,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -74,16 +77,18 @@ class WidgetConfigurationActivity : ComponentActivity() {
         checkAndRequestPermissions(this)
         if (Build.VERSION.SDK_INT >= 30) {
             if (!Environment.isExternalStorageManager()) {
-                val getpermission = Intent()
-                getpermission.action = Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
-                startActivity(getpermission)
+                val uri = Uri.parse("package:${BuildConfig.APPLICATION_ID}")
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri)
+                )
             }
         }
 
         super.onCreate(savedInstanceState)
+        var folderMutable = MutableStateFlow("")
         var fileMutable = MutableStateFlow("")
 
-        val getContent =
+        val getMarkdownFile =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
                 if (it.resultCode == Activity.RESULT_OK && it.data?.data != null)
                 {
@@ -92,12 +97,11 @@ class WidgetConfigurationActivity : ComponentActivity() {
                 }
             }
 
-        val dirRequest = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            uri?.let {
-                // call this to persist permission across decice reboots
-                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                Log.d("test", it.path ?: "WHAT")
-                // do your stuff
+        val getVaultFolder = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (it.resultCode == Activity.RESULT_OK && it.data?.data != null)
+            {
+                folderMutable.value = it.data!!.data!!.path!!.split(":")[1]
+                Log.d("test", fileMutable.value)
             }
         }
 
@@ -106,6 +110,7 @@ class WidgetConfigurationActivity : ComponentActivity() {
             val context = LocalContext.current
 
             val filePath by fileMutable.collectAsState()
+            val vaultPath by folderMutable.collectAsState()
             var showTools by remember {
                 mutableStateOf(true)
             }
@@ -115,17 +120,16 @@ class WidgetConfigurationActivity : ComponentActivity() {
             }
             val md = """  
                 # renderer test!
-                - [ ] This should work?
-                - [x] What about this?
-    
-                # This is a h1 title
-                ## This is a h2 Title
-                ```
-                This is a codeblock
-                ```
-                *Bold!!!*               
+                1. select the markdown page that you want to showcase
+                2. click on show buttons to have buttons for reload and new note
+                3. Otherwise, the full widget will only show the page
+                4. the new note button will be created in the vault of the file chosen!
+                
+                
+                - [x] On the *widget*, click on the text to open the note in obsidian
+                - [x] The *widget* will update every 15 mins 
             """.trimIndent()
-            val render = BitmapRenderer(context, "")
+            val render = BitmapRenderer(context)
             imageBmp = render.renderBitmap(md, 1000)
 
 
@@ -139,22 +143,30 @@ class WidgetConfigurationActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                 ) {
+                    filePicker(filePath = vaultPath, "Select Vault") {
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        getVaultFolder.launch(intent)
+                    }
                     filePicker(filePath = filePath, "Select Page") {
+                        if (vaultPath == "")
+                        {
+                            Toast.makeText(context, "Please select vault first to allow read access", Toast.LENGTH_LONG).show()
+                            return@filePicker
+                        }
                         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             putExtra(DocumentsContract.EXTRA_INITIAL_URI, INITIAL_URI)
                             addCategory(Intent.CATEGORY_OPENABLE)
                             type = "text/markdown"
                         }
-                        getContent.launch(intent)
+                        getMarkdownFile.launch(intent)
                     }
 
-//                    filePicker(filePath = filePath, "Select Folder") {
-//                        dirRequest.launch(null)
-//                    }
 
                     Row {
-                        checkboxAndText(checked = showTools, text = "show Tools", onCheckedChange = {
+                        checkboxAndText(checked = showTools, text = "show Buttons", onCheckedChange = {
                             showTools = it
                         })
                     }
@@ -171,23 +183,21 @@ class WidgetConfigurationActivity : ComponentActivity() {
                             if (fileMutable.value == "")
                             {
                                 Toast.makeText(baseContext, "Please Select a page to show!", Toast.LENGTH_LONG).show()
-                                Log.d("test", "asfdasfd")
+                                return@Button
+                            }
+                            if (folderMutable.value == "")
+                            {
+                                Toast.makeText(baseContext, "Please Select a vault to work in!", Toast.LENGTH_LONG).show()
                                 return@Button
                             }
 
                             CoroutineScope(Dispatchers.IO).launch {
                                 val manager = GlanceAppWidgetManager(baseContext)
                                 val gId = manager.getGlanceIdBy(appWidgetId)
-                                var vaultPath = ""
-                                var vaultFolder = getVaultDirFromFile(Environment.getExternalStorageDirectory().toString(), filePath)
-                                if (vaultFolder != null)
-                                {
-                                    vaultPath = vaultFolder.path
-                                }
 
                                 updateAppWidgetState(context, gId) {
-                                    it[PageWidget.mdFilePathKey] = filePath
-                                    it[PageWidget.vaultPathKey] = vaultPath
+                                    it[PageWidget.mdFilePathKey] = fileMutable.value
+                                    it[PageWidget.vaultPathKey] = folderMutable.value
                                     it[PageWidget.showTools] = showTools
                                 }
                                 PageWidget.update(context, gId)
@@ -204,7 +214,8 @@ class WidgetConfigurationActivity : ComponentActivity() {
 
                     if (imageBmp != null)
                     {
-                        LazyColumn(content = {
+                        LazyColumn(modifier = Modifier.background(Color.DarkGray),
+                            content = {
                             item {
                                 Image(modifier = Modifier
                                     .fillMaxSize(),
@@ -218,22 +229,6 @@ class WidgetConfigurationActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    fun getVaultDirFromFile(baseDir: String, filePath: String): File? {
-        var parentFile = File("$baseDir/$filePath").parentFile
-        while (parentFile.path != baseDir)
-        {
-            if (parentFile.listFiles() == null) { return null }
-            for (file in parentFile.listFiles())
-            {
-                Log.d("test", parentFile.path)
-                if (file.name == ".obsidian") return parentFile
-            }
-
-            parentFile = parentFile.parentFile
-        }
-        return null
     }
 
     private fun startWorkManager(context: Context) {
