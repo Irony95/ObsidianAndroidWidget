@@ -118,15 +118,15 @@ class WidgetConfigurationActivity : ComponentActivity() {
                 mutableStateOf<Bitmap?>(null)
             }
             val md = """  
-                # renderer test!
-                1. select the markdown page that you want to showcase
-                2. click on show buttons to have buttons for reload and new note
-                3. Otherwise, the full widget will only show the page
-                4. the new note button will be created in the vault of the file chosen!
-                
-                
-                - [x] On the *widget*, click on the text to open the note in obsidian
-                - [x] The *widget* will update every 15 mins 
+            # renderer test!
+            1. select the markdown page that you want to showcase
+            2. click on show buttons to have buttons for reload and new note
+            3. Otherwise, the full widget will only show the page
+            4. the new note button will be created in the vault of the file chosen!
+
+
+            - [x] On the *widget*, click on the text to open the note in obsidian
+            - [x] The *widget* will update every 15 mins            
             """.trimIndent()
             val render = BitmapRenderer(context)
             imageBmp = render.renderBitmap(md, 1000)
