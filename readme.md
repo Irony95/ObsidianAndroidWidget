@@ -1,9 +1,7 @@
-# Important note
-I am not a professional in android development, therefore the widget might not work for all android versions due to permission issues. If you have any tips or suggestions feel free to message me/ open up an issue!
+This is a hacked together android widget app created for Obsidian
+I am not a professional in android development, therefore the widget might not work for all android versions due to permission issues. If you have any suggestions feel free to message me/ open up an issue!
 
-## Current Issues
-1. Tables will render incorrectly when text is too long
-2. images will not load correctly
+<img src="https://github.com/Irony95/ObsidianAndroidWidget/assets/31174198/331c9979-9c73-46a1-afd5-e770962d8a39" width="200">
 
 # How to use
 1. Install the .apk app on your android device from the [releases Section](https://github.com/Irony95/ObsidianAndroidWidget/releases/latest)
