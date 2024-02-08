@@ -1,5 +1,6 @@
 package com.example.obsidianandroidwidgets;
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -13,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat.startActivity
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.ColorFilter
@@ -112,9 +114,11 @@ object PageWidget: GlanceAppWidget() {
             val openNote = Intent(Intent.ACTION_VIEW,
                 Uri.parse("obsidian://open?vault=$encodedVault&file=$encodedFile")
             )
-
             val newNote = Intent(Intent.ACTION_VIEW,
                 Uri.parse("obsidian://new?vault=$encodedVault&name=New%20note")
+            )
+            val searchNote = Intent(Intent.ACTION_VIEW,
+                Uri.parse("obsidian://search?vault=$encodedVault")
             )
 
 
@@ -181,6 +185,15 @@ object PageWidget: GlanceAppWidget() {
                                 contentDescription = "add",
                                 modifier = GlanceModifier
                                     .clickable(actionStartActivity(newNote))
+                                    .size(buttonSize.dp)
+                                    .padding(top=paddingSize.dp)
+                            )
+                            Image(
+                                provider = ImageProvider(R.drawable.baseline_search_24),
+                                colorFilter = ColorFilter.tint(ColorProvider(R.color.button_color)),
+                                contentDescription = "search",
+                                modifier = GlanceModifier
+                                    .clickable(actionStartActivity(searchNote))
                                     .size(buttonSize.dp)
                                     .padding(top=paddingSize.dp)
                             )

@@ -74,7 +74,6 @@ class WidgetConfigurationActivity : ComponentActivity() {
     @RequiresApi(Build.VERSION_CODES.Q)
     override fun onCreate(savedInstanceState: Bundle?) {
         WebView.enableSlowWholeDocumentDraw()
-        checkAndRequestPermissions(this)
         if (Build.VERSION.SDK_INT >= 30) {
             if (!Environment.isExternalStorageManager()) {
                 val uri = Uri.parse("package:${BuildConfig.APPLICATION_ID}")
@@ -240,26 +239,6 @@ class WidgetConfigurationActivity : ComponentActivity() {
         WorkManager
             .getInstance(context)
             .enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
-    }
-
-    fun checkAndRequestPermissions(context: Activity): Boolean {
-        val extStorePermission = ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_EXTERNAL_STORAGE)
-        val listPermissionsNeeded: MutableList<String> = ArrayList()
-        if (extStorePermission != PackageManager.PERMISSION_GRANTED) {
-            listPermissionsNeeded.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        }
-        if (extStorePermission != PackageManager.PERMISSION_GRANTED) {
-            listPermissionsNeeded.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-        if (extStorePermission != PackageManager.PERMISSION_GRANTED) {
-            listPermissionsNeeded.add(android.Manifest.permission.MANAGE_EXTERNAL_STORAGE)
-        }
-        if (listPermissionsNeeded.isNotEmpty()) {
-            ActivityCompat.requestPermissions(context, listPermissionsNeeded.toTypedArray(), 100)
-            return false
-        }
-
-        return true
     }
 }
 
