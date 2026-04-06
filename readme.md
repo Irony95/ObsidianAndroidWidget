@@ -17,9 +17,9 @@ This fork focuses on making the original widget stable on modern Android as well
 
 ## Screenshots
 
-| Original | Fork – Dark Mode | Fork – Light Mode
-|---|---|---|
-| ![Original](https://github.com/user-attachments/assets/1c6b17fd-90b8-457a-b349-18b7e7a6f608) | ![Fork - Dark Mode](https://github.com/user-attachments/assets/655a00b7-d889-4112-827c-30f6de25f882) | ![Fork - Light Mode](https://github.com/user-attachments/assets/48cef4d4-c0fc-4160-8178-117c420ac780) |
+| Original | Fork – Dark Mode | Fork – Light Mode | Fork – Config
+|---|---|---|---|
+| ![Original](https://github.com/user-attachments/assets/1c6b17fd-90b8-457a-b349-18b7e7a6f608) | ![Fork - Dark Mode](https://github.com/user-attachments/assets/655a00b7-d889-4112-827c-30f6de25f882) | ![Fork - Light Mode](https://github.com/user-attachments/assets/48cef4d4-c0fc-4160-8178-117c420ac780) | ![Configuration Screen](https://github.com/user-attachments/assets/082e7562-a58e-4e73-83f4-b7726ac50f4b) |
 
 ## Install
 
