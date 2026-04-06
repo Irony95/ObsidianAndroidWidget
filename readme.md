@@ -1,4 +1,4 @@
-# ObsidianAndroidWidgets
+# ObsidianAndroidWidget
 
 Android home-screen widget for displaying Obsidian notes on Android.
 
@@ -9,7 +9,7 @@ This fork focuses on making the original widget stable on modern Android as well
 - Fixes the `GlanceAppWidget` crash caused by exceeding the widget bitmap memory limit.
 - Uses persisted Android document URIs instead of raw file paths to fit with modern permissioning.
 - Improves compatibility with newer Android versions, including Android 14 intent handling.
-- Refresh-only toolbar with feedback, and cleaner note title display.
+- Refresh-only toolbar with feedback and a cleaner note title display.
 - Light, dark, and custom colour theme options.
 - Cached setup values so reconfiguration is faster when changing or re-naming the displayed note.
 - Better markdown rendering support for tables, highlighting, task lists, code blocks, and more.
