@@ -25,7 +25,7 @@ This fork focuses on making the original widget stable on modern Android as well
 
 ### Improved Config Screen
 
-<img src="https://github.com/user-attachments/assets/e0951310-f5b5-4db1-8b73-678d67bb73e5" width="285">
+<img src="https://github.com/user-attachments/assets/8199ce3c-1c36-46b7-b25d-1fec850f2a1a" width="285">
 
 ## Install
 
