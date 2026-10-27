@@ -14,17 +14,18 @@ import android.util.Log
 import android.util.TypedValue
 import android.widget.RemoteViews
 import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalContext
 import androidx.glance.LocalSize
-import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.AndroidRemoteViews
@@ -34,11 +35,10 @@ import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
-import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
-import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.background
 import androidx.glance.currentState
 import androidx.glance.layout.Alignment
@@ -53,7 +53,6 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
-import androidx.work.WorkManager
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.net.URLEncoder
@@ -73,8 +72,6 @@ object PageWidget : GlanceAppWidget() {
     private const val BODY_FRAME_INSET_DP = 0.5f
     private const val BODY_TOP_INSET_DP = 0.5f
     private const val BODY_CONTENT_HORIZONTAL_PADDING_DP = 4
-    private const val BODY_CONTENT_VERTICAL_PADDING_DP = 4
-    private const val MIN_RENDER_WIDTH_DP = 120f
     private const val TOOLBAR_TITLE_SIZE_SP = 22f
     const val MIN_REFRESH_INDICATOR_MS = 500L
     private const val NOT_CONFIGURED_MESSAGE =
@@ -83,10 +80,17 @@ object PageWidget : GlanceAppWidget() {
 
     val noteUriKey = stringPreferencesKey("noteUri")
     val vaultUriKey = stringPreferencesKey("vaultUri")
+    val hostPackageKey = stringPreferencesKey("hostPackage")
+    val accentModeKey = stringPreferencesKey("accentMode")
+    val customAccentHexKey = stringPreferencesKey("customAccentHex")
+    val updateMinutesKey = longPreferencesKey("updateMinutes")
+    val lastUpdatedKey = longPreferencesKey("lastUpdated")
     val noteTitleKey = stringPreferencesKey("noteTitle")
     val vaultNameKey = stringPreferencesKey("vaultName")
     val obsidianFilePathKey = stringPreferencesKey("obsidianFilePath")
     val textKey = stringPreferencesKey("textKey")
+    val vaultAssetsKey = stringPreferencesKey("vaultAssets")
+    val calloutsKey = stringPreferencesKey("callouts")
     val refreshInProgressKey = booleanPreferencesKey("refreshInProgress")
     val appearanceModeKey = stringPreferencesKey("appearanceMode")
     val toolbarBackgroundColorHexKey = stringPreferencesKey("toolbarBackgroundColorHex")
@@ -104,25 +108,20 @@ object PageWidget : GlanceAppWidget() {
     override suspend fun onDelete(context: Context, glanceId: GlanceId) {
         super.onDelete(context, glanceId)
 
-        val widgetCount = GlanceAppWidgetManager(context).getGlanceIds(PageWidget::class.java).size
-        if (widgetCount == 0) {
-            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
-        }
+        WidgetRefreshSchedule.reschedule(context)
     }
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val saved = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
+        NovaWidgetSizing.apply(context, id, saved[hostPackageKey])
+        if (saved[accentModeKey] != "custom") ObsidianTheme.readAccentColor(context, saved[vaultUriKey], ObsidianTheme.DEFAULT_ACCENT_COLOR)
+        if (saved[vaultAssetsKey] == null && !saved[noteUriKey].isNullOrBlank()) refreshNoteSnapshot(context, id)
+        val initialAssets = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)[vaultAssetsKey].orEmpty()
         provideContent {
             val noteUri = currentState(key = noteUriKey).orEmpty()
-            val vaultUri = currentState(key = vaultUriKey).orEmpty()
             val noteTitle = currentState(key = noteTitleKey)
                 ?.takeIf { it.isNotBlank() }
                 ?: resolveNoteTitle(context, noteUri)
-            val vaultName = currentState(key = vaultNameKey)
-                ?.takeIf { it.isNotBlank() }
-                ?: resolveVaultName(context, vaultUri)
-            val obsidianFilePath = currentState(key = obsidianFilePathKey)
-                ?.takeIf { it.isNotBlank() }
-                ?: deriveObsidianFilePath(noteUri, vaultUri, noteTitle)
             val legacyPath = currentState(key = legacyMdFilePathKey).orEmpty()
             val legacyVault = currentState(key = legacyVaultPathKey).orEmpty()
             val legacyBackgroundHex = currentState(key = backgroundColorHexKey)
@@ -189,22 +188,40 @@ object PageWidget : GlanceAppWidget() {
                     else -> NOT_CONFIGURED_MESSAGE
                 }
 
-            val renderer = BitmapRenderer(context)
             val availableWidthDp = (
                 LocalSize.current.width.value -
                     (PADDING_SIZE_DP * 2f) -
                     (BODY_FRAME_INSET_DP * 2f) -
                     (BODY_CONTENT_HORIZONTAL_PADDING_DP * 2f)
                 )
-                .coerceAtLeast(MIN_RENDER_WIDTH_DP)
+                .coerceAtLeast(1f)
             val bitmapWidth = context.toPx(availableWidthDp).toInt()
+            val accentColor = if (currentState(key = accentModeKey) == "custom") {
+                parseAndroidColor(currentState(key = customAccentHexKey).orEmpty(), "#8A5CF5")
+            } else ObsidianTheme.cachedAccentColor(context,
+                currentState(key = vaultUriKey), ObsidianTheme.DEFAULT_ACCENT_COLOR)
+            val rawAssets = currentState(key = vaultAssetsKey) ?: initialAssets
+            val folds = currentState(key = calloutsKey) ?: "{}"
+            val assets = remember(rawAssets, folds) {
+                VaultSnapshot.parse(rawAssets).data.put("callouts", folds).toString()
+            }
+            val preparedNote = remember(text, assets, bitmapWidth, bodyBackgroundColorInt, bodyTextColorInt, accentColor) {
+                runCatching {
+                    NoteTileStore.prepare(context, text, bitmapWidth, bodyBackgroundColorInt,
+                        bodyTextColorInt, accentColor, assets)
+                }.getOrElse { error ->
+                    Log.e(TAG, "Unable to prepare note", error)
+                    NoteTileStore.prepare(context, "Unable to render this note. Tap refresh to retry.",
+                        bitmapWidth, bodyBackgroundColorInt, bodyTextColorInt, accentColor)
+                }
+            }
 
             val toolbarTitle = truncateTitleForToolbar(
                 context = context,
                 title = noteTitle.ifBlank { "Obsidian note" },
                 widgetWidthDp = LocalSize.current.width.value
             )
-            val openNoteAction = buildOpenNoteAction(context, vaultName, obsidianFilePath)
+            val widgetId = GlanceAppWidgetManager(context).getAppWidgetId(id)
 
             Column(
                 modifier = GlanceModifier
@@ -264,9 +281,11 @@ object PageWidget : GlanceAppWidget() {
                     }
                 }
 
-                LazyColumn(
+                NoteBody(
+                    context, widgetId, preparedNote, text,
                     modifier = GlanceModifier
-                        .fillMaxSize()
+                        .fillMaxWidth()
+                        .defaultWeight()
                         .padding(
                             start = BODY_FRAME_INSET_DP.dp,
                             end = BODY_FRAME_INSET_DP.dp,
@@ -274,33 +293,9 @@ object PageWidget : GlanceAppWidget() {
                             bottom = BODY_FRAME_INSET_DP.dp
                         )
                         .cornerRadius(OUTER_CORNER_RADIUS_DP.dp)
-                        .background(composeColor(bodyBackgroundColorInt))
-                ) {
-                    item {
-                        val remoteView = RemoteViews(LocalContext.current.packageName, R.layout.test_layout)
-                        remoteView.setImageViewBitmap(
-                            R.id.imageView,
-                            renderer.renderBitmap(
-                                markdown = text,
-                                width = bitmapWidth,
-                                backgroundColor = bodyBackgroundColorInt,
-                                textColor = bodyTextColorInt
-                            )
-                        )
-                        AndroidRemoteViews(
-                            remoteView,
-                            modifier = GlanceModifier
-                                .fillMaxWidth()
-                                .padding(
-                                    start = BODY_CONTENT_HORIZONTAL_PADDING_DP.dp,
-                                    end = BODY_CONTENT_HORIZONTAL_PADDING_DP.dp,
-                                    top = BODY_CONTENT_VERTICAL_PADDING_DP.dp,
-                                    bottom = BODY_CONTENT_VERTICAL_PADDING_DP.dp
-                                )
-                                .clickableIf(openNoteAction)
-                        )
-                    }
-                }
+                        .background(composeColor(bodyBackgroundColorInt)),
+                    configuredHost = currentState(key = hostPackageKey)
+                )
             }
         }
     }
@@ -380,30 +375,6 @@ object PageWidget : GlanceAppWidget() {
         } catch (_: IllegalArgumentException) {
             fallbackTitle.removeMarkdownExtension()
         }
-    }
-
-    private fun buildOpenNoteAction(
-        context: Context,
-        vaultName: String,
-        obsidianFilePath: String,
-    ): Action? {
-        if (vaultName.isBlank() || obsidianFilePath.isBlank()) {
-            return null
-        }
-
-        val openUri = Uri.parse(
-            "obsidian://open?vault=${encodeUriValue(vaultName)}&file=${encodeUriValue(obsidianFilePath)}"
-        )
-
-        return buildActivityAction(context, openUri)
-    }
-
-    private fun buildActivityAction(context: Context, uri: Uri): Action? {
-        val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val componentName = intent.resolveActivity(context.packageManager) ?: return null
-        intent.component = componentName
-        intent.`package` = componentName.packageName
-        return actionStartActivity(intent)
     }
 
     private fun queryDisplayName(context: Context, uriString: String): String? {
@@ -505,15 +476,16 @@ object PageWidget : GlanceAppWidget() {
     private fun encodeUriValue(value: String): String =
         URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
 
+    fun noteOpenUri(vault: String, file: String): Uri = Uri.parse(
+        "obsidian://open?vault=${encodeUriValue(vault)}&file=${encodeUriValue(file)}"
+    )
+
     private fun String.removeMarkdownExtension(): String = when {
         endsWith(".markdown", ignoreCase = true) -> dropLast(".markdown".length)
         endsWith(".md", ignoreCase = true) -> dropLast(3)
         else -> this
     }
 
-    private fun GlanceModifier.clickableIf(action: Action?): GlanceModifier {
-        return if (action == null) this else clickable(action)
-    }
 }
 
 class SimplePageWidgetReceiver : GlanceAppWidgetReceiver() {
@@ -527,25 +499,19 @@ class ReloadWidget : ActionCallback {
         glanceId: GlanceId,
         parameters: ActionParameters,
     ) {
-        var noteUri = ""
         updateAppWidgetState(context, glanceId) { prefs ->
-            noteUri = prefs[PageWidget.noteUriKey].orEmpty()
             prefs[PageWidget.refreshInProgressKey] = true
         }
         PageWidget.update(context, glanceId)
 
         val refreshStartedAt = SystemClock.elapsedRealtime()
-        val refreshedText = PageWidget.readNoteText(context, noteUri)
-        val elapsedMs = SystemClock.elapsedRealtime() - refreshStartedAt
-        val remainingIndicatorMs = PageWidget.MIN_REFRESH_INDICATOR_MS - elapsedMs
-        if (remainingIndicatorMs > 0) {
-            delay(remainingIndicatorMs)
+        try {
+            refreshNoteSnapshot(context, glanceId)
+            val remainingIndicatorMs = PageWidget.MIN_REFRESH_INDICATOR_MS - (SystemClock.elapsedRealtime() - refreshStartedAt)
+            if (remainingIndicatorMs > 0) delay(remainingIndicatorMs)
+        } finally {
+            updateAppWidgetState(context, glanceId) { prefs -> prefs[PageWidget.refreshInProgressKey] = false }
+            PageWidget.update(context, glanceId)
         }
-
-        updateAppWidgetState(context, glanceId) { prefs ->
-            prefs[PageWidget.textKey] = refreshedText
-            prefs[PageWidget.refreshInProgressKey] = false
-        }
-        PageWidget.update(context, glanceId)
     }
 }

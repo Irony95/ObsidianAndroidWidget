@@ -4,7 +4,6 @@ import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
@@ -15,7 +14,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,16 +21,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,9 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -53,15 +55,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import com.example.obsidianandroidwidgets.ui.theme.ObsidianAndroidWidgetsTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.withContext
 
 private data class SelectedDocumentState(
     val uriString: String = "",
@@ -72,7 +71,11 @@ private data class CachedWidgetConfiguration(
     val vault: SelectedDocumentState = SelectedDocumentState(),
     val note: SelectedDocumentState = SelectedDocumentState(),
     val appearanceMode: WidgetAppearanceMode = WidgetAppearanceMode.Dark,
-    val customPalette: WidgetColorPalette = DARK_WIDGET_PALETTE
+    val customPalette: WidgetColorPalette = DARK_WIDGET_PALETTE,
+    val accentMode: String = "default",
+    val customAccentHex: String = "#8A5CF5",
+    val updateMinutes: Long = 15L,
+    val customPaletteSet: Boolean = false,
 )
 
 private const val CONFIG_CACHE_PREFS = "widgetConfigurationCache"
@@ -93,13 +96,13 @@ class WidgetConfigurationActivity : ComponentActivity() {
         val cachedConfiguration = loadCachedWidgetConfiguration()
         val selectedVault = MutableStateFlow(cachedConfiguration.vault)
         val selectedNote = MutableStateFlow(cachedConfiguration.note)
-
+        val widgetHostPackage = callingPackage ?: referrer?.host
         val getMarkdownFile =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                 val uri = result.data?.data ?: return@registerForActivityResult
                 if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
 
-                persistReadPermission(uri)
+                persistDocumentPermission(uri, result.data?.flags ?: 0)
                 selectedNote.value = SelectedDocumentState(
                     uriString = uri.toString(),
                     label = queryDisplayName(uri)
@@ -114,7 +117,7 @@ class WidgetConfigurationActivity : ComponentActivity() {
                 val uri = result.data?.data ?: return@registerForActivityResult
                 if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
 
-                persistReadPermission(uri)
+                persistDocumentPermission(uri, result.data?.flags ?: 0)
                 selectedVault.value = SelectedDocumentState(
                     uriString = uri.toString(),
                     label = resolveTreeName(uri)
@@ -125,7 +128,20 @@ class WidgetConfigurationActivity : ComponentActivity() {
             val context = LocalContext.current
             val vaultState by selectedVault.collectAsState()
             val noteState by selectedNote.collectAsState()
+            var defaultAccent by remember { mutableStateOf(ObsidianTheme.DEFAULT_ACCENT_COLOR) }
+            var accentMode by remember { mutableStateOf(cachedConfiguration.accentMode) }
+            var customAccentHex by remember { mutableStateOf(cachedConfiguration.customAccentHex) }
+            var updateMinutes by remember { mutableStateOf(cachedConfiguration.updateMinutes) }
+            LaunchedEffect(vaultState.uriString) {
+                val loaded = withContext(Dispatchers.IO) {
+                    ObsidianTheme.accentColor(context, vaultState.uriString, 0)
+                }
+                defaultAccent = loaded.takeUnless { it == 0 } ?: ObsidianTheme.DEFAULT_ACCENT_COLOR
+            }
             var selectedMode by remember { mutableStateOf(cachedConfiguration.appearanceMode) }
+            var customPaletteSet by remember { mutableStateOf(cachedConfiguration.customPaletteSet) }
+            var lastPreset by remember { mutableStateOf(if (cachedConfiguration.appearanceMode == WidgetAppearanceMode.Light ||
+                cachedConfiguration.customPalette == LIGHT_WIDGET_PALETTE) WidgetAppearanceMode.Light else WidgetAppearanceMode.Dark) }
             var toolbarBackgroundHex by remember {
                 mutableStateOf(cachedConfiguration.customPalette.toolbarBackgroundHex)
             }
@@ -164,59 +180,23 @@ class WidgetConfigurationActivity : ComponentActivity() {
                 )
             )
 
-            val sampleMarkdown = """
-                ### Friday
-                - ==Important:== Buy more eggs
-                - **Buy twelve eggs**
-                - *Buy two eggs*
-
-                ```kotlin
-                println("Buy eggs today!")
-                ```
-            """.trimIndent()
-
-            val previewBitmap: Bitmap? = remember(
-                context,
-                effectivePalette.bodyBackgroundHex,
-                effectivePalette.bodyTextHex
-            ) {
-                val safeBackground = normalizeColorHex(
-                    effectivePalette.bodyBackgroundHex,
-                    DARK_WIDGET_PALETTE.bodyBackgroundHex
-                )
-                val safeText = normalizeColorHex(
-                    effectivePalette.bodyTextHex,
-                    DARK_WIDGET_PALETTE.bodyTextHex
-                )
-                runCatching {
-                    BitmapRenderer(context).renderBitmap(
-                        markdown = sampleMarkdown,
-                        width = 1000,
-                        backgroundColor = parseAndroidColor(
-                            safeBackground,
-                            DARK_WIDGET_PALETTE.bodyBackgroundHex
-                        ),
-                        textColor = parseAndroidColor(
-                            safeText,
-                            DARK_WIDGET_PALETTE.bodyTextHex
-                        )
-                    )
-                }.getOrNull()
-            }
-
             ObsidianAndroidWidgetsTheme {
                 val appWidgetId = intent?.extras?.getInt(
                     AppWidgetManager.EXTRA_APPWIDGET_ID,
                     AppWidgetManager.INVALID_APPWIDGET_ID
                 ) ?: AppWidgetManager.INVALID_APPWIDGET_ID
 
-                Column(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Widget setup", style = MaterialTheme.typography.headlineSmall,
+                        modifier = Modifier.padding(vertical = 8.dp))
                     filePicker(
                         filePath = vaultState.label.ifBlank { "No vault selected" },
                         buttonText = "Select Vault"
                     ) {
                         val pickVaultIntent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                             addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
                             if (vaultState.uriString.isNotBlank()) {
@@ -245,6 +225,7 @@ class WidgetConfigurationActivity : ComponentActivity() {
                         val pickNoteIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                             type = "*/*"
                             putExtra(
@@ -261,34 +242,72 @@ class WidgetConfigurationActivity : ComponentActivity() {
 
                     themeModePicker(
                         selectedMode = selectedMode,
-                        onModeSelected = { selectedMode = it }
+                        onModeSelected = { mode ->
+                            if (mode == WidgetAppearanceMode.Custom) {
+                                val seed = customPaletteOnEntry(lastPreset, customPalette, customPaletteSet)
+                                toolbarBackgroundHex = seed.toolbarBackgroundHex
+                                toolbarTextHex = seed.toolbarTextHex
+                                bodyBackgroundHex = seed.bodyBackgroundHex
+                                bodyTextHex = seed.bodyTextHex
+                            }
+                            if (mode != WidgetAppearanceMode.Custom) lastPreset = mode
+                            selectedMode = mode
+                        },
+                        onReset = {
+                            toolbarBackgroundHex = DARK_WIDGET_PALETTE.toolbarBackgroundHex
+                            toolbarTextHex = DARK_WIDGET_PALETTE.toolbarTextHex
+                            bodyBackgroundHex = DARK_WIDGET_PALETTE.bodyBackgroundHex
+                            bodyTextHex = DARK_WIDGET_PALETTE.bodyTextHex
+                            customPaletteSet = false
+                            selectedMode = WidgetAppearanceMode.Dark
+                            lastPreset = WidgetAppearanceMode.Dark
+                        }
                     )
 
                     if (selectedMode == WidgetAppearanceMode.Custom) {
                         colorInputRow(
                             label = "Toolbar Background",
                             value = toolbarBackgroundHex,
-                            onValueChange = { toolbarBackgroundHex = it }
+                            onValueChange = { toolbarBackgroundHex = it; customPaletteSet = true }
                         )
 
                         colorInputRow(
                             label = "Toolbar Text",
                             value = toolbarTextHex,
-                            onValueChange = { toolbarTextHex = it }
+                            onValueChange = { toolbarTextHex = it; customPaletteSet = true }
                         )
 
                         colorInputRow(
                             label = "Body Background",
                             value = bodyBackgroundHex,
-                            onValueChange = { bodyBackgroundHex = it }
+                            onValueChange = { bodyBackgroundHex = it; customPaletteSet = true }
                         )
 
                         colorInputRow(
                             label = "Body Text",
                             value = bodyTextHex,
-                            onValueChange = { bodyTextHex = it }
+                            onValueChange = { bodyTextHex = it; customPaletteSet = true }
                         )
                     }
+
+                    Text("Accent colour", style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = 12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("default" to "Default", "custom" to "Custom").forEach { (value, label) ->
+                            Button(onClick = {
+                                accentMode = value
+                            }, colors = ButtonDefaults.buttonColors(
+                                containerColor = if (accentMode == value) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (accentMode == value) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )) { Text(label) }
+                        }
+                    }
+                    if (accentMode == "custom") {
+                        colorInputRow("Accent hex colour", customAccentHex) { customAccentHex = it }
+                    }
+                    Text("Check for updates", style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = 12.dp))
+                    refreshIntervalPicker(updateMinutes) { updateMinutes = it }
 
                     Row(
                         modifier = Modifier
@@ -297,6 +316,10 @@ class WidgetConfigurationActivity : ComponentActivity() {
                         horizontalArrangement = Arrangement.End,
                     ) {
                         Button(onClick = {
+                            if (accentMode == "custom" && !isValidColorHex(customAccentHex)) {
+                                Toast.makeText(context, "Accent colour must be a hex colour, e.g. #00ABA9", Toast.LENGTH_LONG).show()
+                                return@Button
+                            }
                             if (selectedMode == WidgetAppearanceMode.Custom) {
                                 val colorFields = listOf(
                                     Triple(
@@ -382,7 +405,11 @@ class WidgetConfigurationActivity : ComponentActivity() {
                                     vault = vaultState,
                                     note = noteState,
                                     appearanceMode = selectedMode,
-                                    customPalette = safeCustomPalette
+                                    customPalette = safeCustomPalette,
+                                    accentMode = accentMode,
+                                    customAccentHex = normalizeColorHex(customAccentHex, "#8A5CF5"),
+                                    updateMinutes = updateMinutes,
+                                    customPaletteSet = customPaletteSet
                                 )
                             )
 
@@ -401,15 +428,20 @@ class WidgetConfigurationActivity : ComponentActivity() {
                                     noteTitle
                                 )
                                 val noteText = PageWidget.readNoteText(context, noteState.uriString)
+                                ObsidianTheme.readAccentColor(context, vaultState.uriString, 0)
 
                                 updateAppWidgetState(context, glanceId) { prefs ->
                                     prefs[PageWidget.noteUriKey] = noteState.uriString
                                     prefs[PageWidget.vaultUriKey] = vaultState.uriString
+                                    if (widgetHostPackage != null) prefs[PageWidget.hostPackageKey] = widgetHostPackage
                                     prefs[PageWidget.noteTitleKey] = noteTitle
                                     prefs[PageWidget.vaultNameKey] = vaultName
                                     prefs[PageWidget.obsidianFilePathKey] = obsidianFilePath
                                     prefs[PageWidget.textKey] = noteText
                                     prefs[PageWidget.appearanceModeKey] = selectedMode.storageValue
+                                    prefs[PageWidget.accentModeKey] = accentMode
+                                    prefs[PageWidget.customAccentHexKey] = normalizeColorHex(customAccentHex, "#8A5CF5")
+                                    prefs[PageWidget.updateMinutesKey] = updateMinutes
                                     prefs[PageWidget.toolbarBackgroundColorHexKey] =
                                         safeCustomPalette.toolbarBackgroundHex
                                     prefs[PageWidget.toolbarTextColorHexKey] =
@@ -422,7 +454,9 @@ class WidgetConfigurationActivity : ComponentActivity() {
                                     prefs[PageWidget.textColorHexKey] = savedPalette.bodyTextHex
                                 }
 
+                                refreshNoteSnapshot(context, glanceId)
                                 PageWidget.update(context, glanceId)
+                                WidgetRefreshSchedule.reschedule(context)
                             }
 
                             val resultValue = Intent().putExtra(
@@ -430,14 +464,14 @@ class WidgetConfigurationActivity : ComponentActivity() {
                                 appWidgetId
                             )
                             setResult(Activity.RESULT_OK, resultValue)
-                            startWorkManager(context)
                             finish()
                         }) {
                             Text("Complete")
                         }
                     }
 
-                    if (previewBitmap != null) {
+                    Text("Preview", style = MaterialTheme.typography.titleMedium)
+                    run {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -452,7 +486,7 @@ class WidgetConfigurationActivity : ComponentActivity() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = noteState.label.ifBlank { "Preview Title" },
+                                    text = "Example",
                                     modifier = Modifier
                                         .weight(1f)
                                         .padding(end = 3.5.dp),
@@ -477,15 +511,10 @@ class WidgetConfigurationActivity : ComponentActivity() {
                                     .clip(RoundedCornerShape(22.dp))
                                     .background(bodyBackgroundColor)
                             ) {
-                                Image(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 4.dp, vertical = 4.dp),
-                                    bitmap = previewBitmap.asImageBitmap(),
-                                    contentDescription = "Rendered markdown preview",
-                                    alignment = Alignment.TopStart,
-                                    contentScale = ContentScale.FillWidth
-                                )
+                                SampleNotePreview(background = bodyBackgroundColor,
+                                    text = Color(parseAndroidColor(effectivePalette.bodyTextHex, DARK_WIDGET_PALETTE.bodyTextHex)),
+                                    accent = if (accentMode == "custom") parseAndroidColor(customAccentHex, "#8A5CF5") else defaultAccent,
+                                    vaultName = vaultState.label)
                             }
                         }
                     }
@@ -494,11 +523,11 @@ class WidgetConfigurationActivity : ComponentActivity() {
         }
     }
 
-    private fun persistReadPermission(uri: Uri) {
+    private fun persistDocumentPermission(uri: Uri, grantedFlags: Int) {
         runCatching {
             contentResolver.takePersistableUriPermission(
                 uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                grantedFlags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             )
         }
     }
@@ -534,22 +563,14 @@ class WidgetConfigurationActivity : ComponentActivity() {
         }.getOrDefault("Selected vault")
     }
 
-    private fun startWorkManager(context: Context) {
-        val request = PeriodicWorkRequestBuilder<UpdateWidgetWorker>(
-            15,
-            TimeUnit.MINUTES,
-        ).build()
-
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            WORK_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
-            request
-        )
-    }
-
     private fun loadCachedWidgetConfiguration(): CachedWidgetConfiguration {
         val prefs = getSharedPreferences(CONFIG_CACHE_PREFS, Context.MODE_PRIVATE)
         return CachedWidgetConfiguration(
+            customPaletteSet = prefs.getBoolean("customPaletteSet", listOf(CACHE_TOOLBAR_BACKGROUND_KEY,
+                CACHE_TOOLBAR_TEXT_KEY, CACHE_BODY_BACKGROUND_KEY, CACHE_BODY_TEXT_KEY).any { prefs.contains(it) }),
+            accentMode = prefs.getString("accentMode", "default").orEmpty(),
+            customAccentHex = prefs.getString("customAccentHex", "#8A5CF5").orEmpty(),
+            updateMinutes = prefs.getLong("updateMinutes", 15L).takeIf { it in WidgetRefreshSchedule.options } ?: 15L,
             vault = SelectedDocumentState(
                 uriString = prefs.getString(CACHE_VAULT_URI_KEY, "").orEmpty(),
                 label = prefs.getString(CACHE_VAULT_LABEL_KEY, "").orEmpty()
@@ -597,6 +618,10 @@ class WidgetConfigurationActivity : ComponentActivity() {
     private fun saveCachedWidgetConfiguration(config: CachedWidgetConfiguration) {
         getSharedPreferences(CONFIG_CACHE_PREFS, Context.MODE_PRIVATE)
             .edit()
+            .putString("accentMode", config.accentMode)
+            .putString("customAccentHex", config.customAccentHex)
+            .putLong("updateMinutes", config.updateMinutes)
+            .putBoolean("customPaletteSet", config.customPaletteSet)
             .putString(CACHE_VAULT_URI_KEY, config.vault.uriString)
             .putString(CACHE_VAULT_LABEL_KEY, config.vault.label)
             .putString(CACHE_NOTE_URI_KEY, config.note.uriString)
@@ -638,27 +663,34 @@ class WidgetConfigurationActivity : ComponentActivity() {
 private fun themeModePicker(
     selectedMode: WidgetAppearanceMode,
     onModeSelected: (WidgetAppearanceMode) -> Unit,
+    onReset: () -> Unit,
 ) {
     Text(
         text = "Theme",
-        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(top = 12.dp)
     )
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         WidgetAppearanceMode.values().forEach { mode ->
             val isSelected = mode == selectedMode
             Button(
                 onClick = { onModeSelected(mode) },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isSelected) Color(0xFF3A6EA5) else Color(0xFF4A4A4A),
-                    contentColor = Color.White
+                    containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             ) {
                 Text(mode.label)
+            }
+        }
+        if (selectedMode == WidgetAppearanceMode.Custom) {
+            IconButton(onClick = onReset, modifier = Modifier.size(36.dp)) {
+                Icon(painterResource(R.drawable.baseline_refresh_24), "Reset custom theme")
             }
         }
     }
@@ -666,8 +698,6 @@ private fun themeModePicker(
 
 @Composable
 fun filePicker(filePath: String, buttonText: String, onClick: () -> Unit) {
-    val scroll = rememberScrollState(0)
-
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -676,11 +706,26 @@ fun filePicker(filePath: String, buttonText: String, onClick: () -> Unit) {
         Text(
             filePath,
             modifier = Modifier
-                .width(250.dp)
-                .horizontalScroll(scroll)
+                .weight(1f).padding(end = 12.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         Button(onClick = onClick, modifier = Modifier.padding(5.dp)) {
-            Text(text = buttonText)
+            Text(text = buttonText, maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+@Composable
+private fun refreshIntervalPicker(minutes: Long, onSelected: (Long) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }) { Text(WidgetRefreshSchedule.label(minutes)) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            WidgetRefreshSchedule.options.forEach { value ->
+                DropdownMenuItem(text = { Text(WidgetRefreshSchedule.label(value)) },
+                    onClick = { onSelected(value); expanded = false })
+            }
         }
     }
 }
@@ -695,7 +740,7 @@ fun colorInputRow(label: String, value: String, onValueChange: (String) -> Unit)
         singleLine = true,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .padding(vertical = 4.dp)
     )
 }
 

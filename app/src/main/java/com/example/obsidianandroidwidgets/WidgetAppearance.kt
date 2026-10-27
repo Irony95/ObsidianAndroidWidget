@@ -11,8 +11,8 @@ enum class WidgetAppearanceMode(
     val storageValue: String,
     val label: String,
 ) {
-    Light("light", "Light"),
     Dark("dark", "Dark"),
+    Light("light", "Light"),
     Custom("custom", "Custom");
 
     companion object {
@@ -43,3 +43,6 @@ fun WidgetAppearanceMode.resolvePalette(customPalette: WidgetColorPalette): Widg
         WidgetAppearanceMode.Custom -> customPalette
     }
 }
+
+internal fun customPaletteOnEntry(preset: WidgetAppearanceMode, saved: WidgetColorPalette, explicitlySet: Boolean): WidgetColorPalette =
+    if (explicitlySet) saved else preset.resolvePalette(DARK_WIDGET_PALETTE)

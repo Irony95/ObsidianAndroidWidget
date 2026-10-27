@@ -18,3 +18,5 @@ build-release.ps1
 *.apk
 *.aab
 .idea/
+/.gradle*/
+**/build/
