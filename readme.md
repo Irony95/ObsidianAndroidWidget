@@ -55,9 +55,9 @@ This fork originally focused on making the original widget stable on modern Andr
 
 ### Widget Comparison
 
-| Original | Fork – Dark Mode | Fork – Light Mode |
-|---|---|---|
-| ![Original](https://github.com/user-attachments/assets/e9e916b4-a4ae-4247-8519-d42e2803f69b) | ![Fork – Dark Mode](https://github.com/user-attachments/assets/17528220-7712-4689-b9d1-fa5ae657f03d) | ![Fork – Light Mode](https://github.com/user-attachments/assets/bc325ee3-d1e5-43ec-9d54-b98cefc950c8) |
+| Original | Official (1.15.1) | Fork – Dark Mode | Fork – Light Mode |
+|---|---|---|---|
+| ![Original](https://github.com/user-attachments/assets/e9e916b4-a4ae-4247-8519-d42e2803f69b) | ![Official Release](https://github.com/user-attachments/assets/10e2feda-1bcd-41e9-b987-b0d90914b818) | ![Fork – Dark Mode](https://github.com/user-attachments/assets/17528220-7712-4689-b9d1-fa5ae657f03d) | ![Fork – Light Mode](https://github.com/user-attachments/assets/bc325ee3-d1e5-43ec-9d54-b98cefc950c8) |
 
 ### Config Comparison
 
